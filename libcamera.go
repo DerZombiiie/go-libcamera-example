@@ -1,8 +1,11 @@
 package main
 
 import (
+	"github.com/DerZombiiie/go-libcamera-example/collector"
+
 	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -10,77 +13,39 @@ import (
 )
 
 func main() {
-	cmd := exec.Command("libcamera-still", "-o-", "-s", "-t0", "-ejpg")
+	cmd := exec.Command("libcamera-still",
+		"-o-",   // stdout
+		"-s",    // listen on signals like SIGUSR1
+		"-t0",   // no max runtime
+		"-ejpg", // jpeg encoding
+	)
 
-	cmd.Stdout = MakeWriter(time.Millisecond * 250)
-	cmd.Stderr = os.Stderr
+	// create writecollector with 250ms timeout
+	cmd.Stdout = collector.MakeCollector(time.Millisecond*250, func(buf *bytes.Buffer) {
+		file := fmt.Sprintf("out-%d.jpg", time.Now().Unix())
 
+		f, err := os.Create(file)
+		if err != nil {
+			log.Printf("Error creating file '%s': %s \n", file, err)
+			return
+		}
+
+		defer f.Close()
+
+		io.Copy(f, buf)
+		log.Printf("Created file '%s' \n", file)
+	})
+
+	cmd.Stderr = os.Stderr // passthrough error
+
+	// start process
 	if err := cmd.Start(); err != nil {
 		panic(err)
 	}
 
+	// log pid
 	log.Printf("PID: %d \n", cmd.Process.Pid)
 
+	// wait for process to get killed
 	cmd.Wait()
-}
-
-func MakeWriter(d time.Duration) *CollectiveWriter {
-	c := &CollectiveWriter{CollectionTime: d}
-
-	c.buf = &bytes.Buffer{}
-	c.data = make(chan []byte, 100)
-	c.ok = make(chan struct{})
-
-	go func(w *CollectiveWriter) {
-		for {
-			select {
-			case data := <-w.data:
-				log.Printf("First received byte though channel: %v \n", data[0])
-				_, err := c.buf.Write(data)
-				w.ok <- struct{}{}
-				if err != nil {
-					log.Printf("Error writing first []byte: %s", err)
-				}
-				timeout := time.NewTimer(c.CollectionTime).C
-
-			inner:
-				for {
-					select {
-					case data := <-w.data:
-						c.buf.Write(data)
-						w.ok <- struct{}{}
-					case <-timeout:
-						break inner
-					}
-				}
-
-				// dump
-				b := c.buf.Bytes()
-
-				file := fmt.Sprintf("out-%d.jpg", time.Now().Unix())
-				log.Printf("Data received has length: %d \n filename: %s \n first byte: %v \n", len(b), file, b[0])
-				os.WriteFile(file, b, 0755)
-				c.buf.Reset()
-			}
-		}
-	}(c)
-
-	return c
-}
-
-type CollectiveWriter struct {
-	CollectionTime time.Duration
-
-	data chan []byte
-	ok   chan struct{}
-	buf  *bytes.Buffer
-}
-
-func (w *CollectiveWriter) Write(b []byte) (n int, err error) {
-	log.Printf("First bit is %v \n", b[0])
-	w.data <- b
-	<-w.ok
-	log.Printf("First bit is %v \n", b[0])
-
-	return len(b), nil
 }

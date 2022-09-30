@@ -1,3 +1,3 @@
-module a.b/c
+module github.com/DerZombiiie/go-libcamera-example
 
 go 1.19
