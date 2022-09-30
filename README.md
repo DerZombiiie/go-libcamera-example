@@ -15,3 +15,4 @@ Usage:
 - wait.. after a second or so the programm should tell you a filename where the image is saved
   name is out-<unixtime>.jpg
 
+this example is under the MIT license, see LICENSE
